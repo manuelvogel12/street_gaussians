@@ -544,13 +544,24 @@ def main():
     seq_lists = open(segment_file).read().splitlines()
     # seq_lists = open(os.path.join(root_dir, 'segment_list.txt')).read().splitlines()
     os.makedirs(save_dir, exist_ok=True)
-    for i, scene_id in enumerate(scene_ids_list):
-        assert seq_names[i][3:] == seq_lists[scene_id][8:14]
-        seq_save_dir = os.path.join(save_dir, str(scene_id).zfill(3))
+    # for i, scene_id in enumerate(scene_ids_list):
+    #     assert seq_names[i][3:] == seq_lists[scene_id][8:14]
+    #     seq_save_dir = os.path.join(save_dir, str(scene_id).zfill(3))
+    #     parse_seq_rawdata(
+    #         process_list=process_list,
+    #         root_dir=root_dir,
+    #         seq_name=seq_lists[scene_id],
+    #         seq_save_dir=seq_save_dir,
+    #         track_file=track_file,
+    #     )
+
+    for i, file_name in enumerate(os.listdir(root_dir)):
+        # assert seq_names[i][3:] == seq_lists[scene_id][8:14]
+        seq_save_dir = os.path.join(save_dir, str(i).zfill(4))
         parse_seq_rawdata(
             process_list=process_list,
             root_dir=root_dir,
-            seq_name=seq_lists[scene_id],
+            seq_name=file_name.split(".")[0],
             seq_save_dir=seq_save_dir,
             track_file=track_file,
         )

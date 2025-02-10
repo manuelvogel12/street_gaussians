@@ -15,6 +15,8 @@ from lib.utils.graphics_utils import get_rays, sphere_intersection
 from lib.utils.general_utils import matrix_to_quaternion, quaternion_to_matrix_numpy
 from lib.datasets.base_readers import storePly, get_Sphere_Norm
 
+import matplotlib.pyplot as plt
+
 waymo_track2label = {"vehicle": 0, "pedestrian": 1, "cyclist": 2, "sign": 3, "misc": -1}
 
 _camera2label = {
@@ -130,12 +132,14 @@ def get_obj_pose_tracking(datadir, selected_frames, ego_poses, cameras=[0, 1, 2,
     
     start_frame, end_frame = selected_frames[0], selected_frames[1]
 
+    PLOTTING = False
+
     image_dir = os.path.join(datadir, 'images')
     n_cameras = 5
     n_images = len(os.listdir(image_dir))
     n_frames = n_images // n_cameras
     n_obj_in_frame = np.zeros(n_frames)
-    
+    last_frame_id = None
     for tracklet in tracklets_str:
         tracklet = tracklet.split()
         frame_id = int(tracklet[0])
@@ -180,9 +184,17 @@ def get_obj_pose_tracking(datadir, selected_frames, ego_poses, cameras=[0, 1, 2,
     for tracklet in tracklets_array:
         frame_id = int(tracklet[0])
         track_id = int(tracklet[1])
-        if start_frame <= frame_id <= end_frame:            
+        if start_frame <= frame_id <= end_frame:
+            if PLOTTING and last_frame_id != frame_id:
+                plt.show()
+                plt.clf()
+                plt.xlim([0, 400])
+                plt.ylim([-40, 40])
+                last_frame_id = frame_id
             ego_pose = ego_poses[frame_id]
             obj_pose_vehicle, obj_pose_world = make_obj_pose(ego_pose, tracklet[6:10])
+            if PLOTTING:
+                plt.plot(obj_pose_world[0], obj_pose_world[1], 'o')
 
             frame_idx = frame_id - start_frame
             obj_column = np.argwhere(visible_objects_ids[frame_idx, :] < 0).min()
@@ -193,12 +205,29 @@ def get_obj_pose_tracking(datadir, selected_frames, ego_poses, cameras=[0, 1, 2,
 
     # Remove static objects
     print("Removing static objects")
+
+    EXCLUDE_OBJECTS = True
+    if EXCLUDE_OBJECTS:
+        dynamic_objects = None
+        if os.path.isfile(os.path.join(datadir, 'vehicles.txt')):
+            with open(os.path.join(datadir, 'vehicles.txt'), 'r') as f:
+                dynamic_str = f.read()
+                dynamic_objects = [int(obj) for obj in dynamic_str.split(" ") if obj.isdigit()]
+                print("loaded the following objects", dynamic_objects)
+
     for key in objects_info.copy().keys():
         all_obj_idx = np.where(visible_objects_ids == key)
         if len(all_obj_idx[0]) > 0:
             obj_world_postions = visible_objects_pose_world[all_obj_idx][:, :3]
             distance = np.linalg.norm(obj_world_postions[0] - obj_world_postions[-1])
             dynamic = np.any(np.std(obj_world_postions, axis=0) > 0.5) or distance > 2
+
+            #if key > 30:
+            #    dynamic = False
+            if EXCLUDE_OBJECTS:
+                if dynamic_objects is not None:
+                    if key not in dynamic_objects:
+                        dynamic = False
             if not dynamic:
                 visible_objects_ids[all_obj_idx] = -1.
                 visible_objects_pose_vehicle[all_obj_idx] = -1.
@@ -206,7 +235,16 @@ def get_obj_pose_tracking(datadir, selected_frames, ego_poses, cameras=[0, 1, 2,
                 objects_info.pop(key)
         else:
             objects_info.pop(key)
-            
+
+    # Make the vehicle.txt file based on the original track
+    if EXCLUDE_OBJECTS:
+        if dynamic_objects is None:
+            print("saving dynamic objects", objects_info.keys())
+            with open(os.path.join(datadir, 'track/vehicles.txt'), 'w') as f:
+                f.write(' '.join([str(s) for s in objects_info.keys()]))
+
+
+
     # Clip max_num_obj
     mask = visible_objects_ids >= 0
     max_obj_per_frame_new = np.sum(mask, axis=1).max()
@@ -412,7 +450,7 @@ def generate_dataparser_outputs(
         obj_bound = np.zeros((h, w)).astype(np.uint8)
         obj_tracklets = object_tracklets_vehicle[frames_idx[i]]
         ixt, ext = ixts[i], exts[i]
-        for obj_tracklet in obj_tracklets:
+        for obj_tracklet in obj_tracklets:  # obj_tracklet: id, x,y,z,  q0, q1, q2, q3 (in frame: vehicle)
             track_id = int(obj_tracklet[0])
             if track_id >= 0:
                 obj_pose_vehicle = np.eye(4)    

@@ -24,7 +24,7 @@ from groundingdino.util.inference import annotate, load_image, predict
 import supervision as sv
 
 # segment anything
-from segment_anything import build_sam, SamPredictor 
+from segment_anything import build_sam, SamPredictor, sam_model_registry
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -57,7 +57,8 @@ def setup(args):
     # ======================== Load Segment Anything model ========================
     print(colored('Load SAM model', 'green'))
     # sam_checkpoint = '/nas/home/yanyunzhi/segment-anything/sam_vit_h_4b8939.pth.1'
-    sam = build_sam(checkpoint=args.sam_checkpoint)
+    sam = sam_model_registry["vit_l"](checkpoint=args.sam_checkpoint)
+
     sam.cuda()
     global sam_predictor
     sam_predictor = SamPredictor(sam)

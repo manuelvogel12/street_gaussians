@@ -1,13 +1,13 @@
 task: waymo_full_exp
-source_path: ./data/waymo/training/002
-exp_name: waymo_train_002
+source_path: ./data/waymo/training/PLACEHOLDER
+exp_name: waymo_train_PLACEHOLDER
 
 data:
   split_test: -1
   split_train: 1
   type: Waymo
   white_background: false
-  selected_frames: [98, 198]
+  selected_frames: [START_FRAME, END_FRAME]
   cameras: [0, 1, 2]
   extent: 10
   use_colmap: true
@@ -27,9 +27,9 @@ model:
 
 train:
   iterations: 50000
-  test_iterations: [7000, 30000, 50000]
-  save_iterations: [50000]
-  checkpoint_iterations: [50000]
+  test_iterations: [7000, 15000, 30000, 50000]
+  save_iterations: [10000, 20000, 30000, 40000, 50000]
+  checkpoint_iterations: [10000, 20000, 30000, 40000, 50000]
 
 optim:
   prune_box_interval: 100
@@ -76,7 +76,3 @@ optim:
 render:
   fps: 24
   concat_cameras: [1, 0, 2]
-
-eval:
-  skip_train: False
-  skip_test: False
