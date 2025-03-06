@@ -240,7 +240,7 @@ def get_obj_pose_tracking(datadir, selected_frames, ego_poses, cameras=[0, 1, 2,
     if EXCLUDE_OBJECTS:
         if dynamic_objects is None:
             print("saving dynamic objects", objects_info.keys())
-            with open(os.path.join(datadir, 'track/vehicles.txt'), 'w') as f:
+            with open(os.path.join(datadir, 'vehicles.txt'), 'w') as f:
                 f.write(' '.join([str(s) for s in objects_info.keys()]))
 
 

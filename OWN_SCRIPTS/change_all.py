@@ -22,7 +22,8 @@ def get_config():
     parser.add_argument("--end_frame", type=int, default=197, help="Ending frame index")
     parser.add_argument("--random_translation", type=float, nargs=2, default=[-6.0, 6.0], help="Random translation range")
     parser.add_argument("--random_rotation", type=float, nargs=2, default=[-0.4, 0.4], help="Random rotation range")
-    parser.add_argument("--folder", type=str, default="../data/waymo/training/0000", help="Path to training folder")
+    parser.add_argument("--folder", type=str, default="../data/waymo/training/0002", help="Path to training folder")
+    parser.add_argument("--skip_plot", action="store_true", help="Skip plotting")
 
     return parser.parse_args()
 
@@ -62,18 +63,31 @@ print("Step 1: Move directories (if necessary) ran SUCCESSFULLY")
 ################################################################
 #  STEP 2: Change Timestamps
 ################################################################
+MOVING = True  # whether or not the other cars should move
 
 # Load the JSON file
 with open(f"{cfg.folder}/timestamps_original.json", "r") as file:
     data = json.load(file)
 
-# Get the FRAME data
-frame_data = data["FRAME"]
+if MOVING:
+    # Get the FRAME data
+    frame_data = data["FRAME"]
 
-# Replace all other entries with FRAME's data
-for key in data.keys():
-    if key != "FRAME":
-        data[key] = frame_data
+    # Replace all other entries with FRAME's data
+    for key in data.keys():
+        if key != "FRAME":
+            data[key] = frame_data
+
+else:  # STATIC OTHER CARS
+    # Get the timestamp of FRAME 150
+    i_fixed = cfg.start_frame + 50
+    frame_150_timestamp = data["FRAME"][f"{i_fixed:06d}"]
+
+    # Replace all other entries with FRAME 150's timestamp
+    for key1, value1 in data.items():
+        for key2 in data[key1].keys():
+            new_timestamp = int(key2) * 0.0001 + frame_150_timestamp
+            data[key1][key2] = new_timestamp
 
 # Save the updated JSON file
 with open(f"{cfg.folder}/timestamps.json", "w") as file:
@@ -154,17 +168,44 @@ data_all = pd.read_csv(input_track_file, sep='\s+', header=0)
 
 y_changes = {}
 yaw_changes = {}
-mpc_steering_angles = {}
+
+poses_original = []
+poses_new = {}
+
+modes = ["constant_offset", "random", "sinus"]
+mode = "sinus"
 
 # for x, y, yaw, index in zip(x_list, y_list, yaw_list, range(cfg.start_frame, cfg.end_frame)):
 for index in range(cfg.start_frame, cfg.end_frame):
+    # i_fixed = cfg.start_frame + 50
+
     old_ego_pose = np.loadtxt(os.path.join(cfg.folder, "ego_pose_original", f"{index:06d}.txt"))
-    y_change = random.uniform(*cfg.random_translation)
-    yaw_change = random.uniform(*cfg.random_rotation)
+    poses_original.append(old_ego_pose)
+    # IF LEFT TO RIGHT OR ROTATE
+        # i_fixed = cfg.start_frame + 50
+        # old_ego_pose = np.loadtxt(os.path.join(cfg.folder, "ego_pose_original", f"{index:06d}.txt"))
+        # y_change = 0.0 # ((index - cfg.start_frame)/100.0 * 12) - 6 # for left-to-right
+        # yaw_change = ((index - cfg.start_frame)/100.0 * 2 * 3.1415) - 3.1415  # for left-to-right
+    yaw_change = 0.0
+    y_change = 0.0
+
+    if mode == "left_to_right":
+        y_change = ((index - cfg.start_frame) / 100.0 * 12) - 6
+
+    if mode == "random":
+        y_change = random.uniform(*cfg.random_translation)
+        yaw_change = random.uniform(*cfg.random_rotation)
+
+    if mode == "sinus":
+        y_change = np.sin(index * np.pi / 20) * 2
+
+    if mode == "constant_offset":
+        y_change = 5.0
+
     new_ego_pose = change_transformation_matrix(old_ego_pose, y_change, yaw_change)
+    poses_new[index] = new_ego_pose
     y_changes[index] = y_change
     yaw_changes[index] = yaw_change
-    mpc_steering_angles[index] = 0.0 # TODO
     assert new_ego_pose.shape == (4, 4)
     for suffix in [".txt", "_0.txt", "_1.txt", "_2.txt", "_3.txt", "_4.txt"]:
         output_file_path = os.path.join(cfg.folder, "ego_pose", f"{index:06d}{suffix}")
@@ -187,18 +228,11 @@ for index in range(cfg.start_frame, cfg.end_frame):
     data_all.loc[data_all["frame_id"] == index, ['box_center_x', 'box_center_y', 'box_center_z', 'box_heading']] \
         = data[['box_center_x', 'box_center_y', 'box_center_z', 'box_heading']]
 
+    #data_all.loc[data_all["frame_id"] == index, ['track_id', 'object_class', 'alpha', 'box_height', 'box_width', 'box_length','box_center_x', 'box_center_y', 'box_center_z', 'box_heading', 'speed']] \
+    #    = data[['track_id', 'object_class', 'alpha', 'box_height', 'box_width', 'box_length','box_center_x', 'box_center_y', 'box_center_z', 'box_heading', 'speed']]
+
+    # data_all.fillna(-1).astype({'track_id': int})
 data_all.to_csv(output_track_file, sep=' ', index=False, header=True)
-
-data_info = {
-    "y_changes": y_changes,
-    "yaw_changes": yaw_changes,
-    "mpc_steering_angles": mpc_steering_angles,
-}
-
-# Save to a JSON file
-with open(f"{cfg.folder}/info_data.json", "w") as json_file:
-    json.dump(data_info, json_file, indent=4)  # `indent=4` makes it pretty-printed
-
 
 print("Step 3: Modified ego poses ran SUCCESSFULLY")
 print("Step 4: Modified track_info.txt (poses of other cars) ran SUCCESSFULLY")
@@ -207,93 +241,243 @@ print("Step 4: Modified track_info.txt (poses of other cars) ran SUCCESSFULLY")
 
 
 
+################################################################
+#  STEP 5: Run MPC
+################################################################
+MPC = False
+
+mpc_steering_angles = {}
+mpc_acceleration = {}
+
+
+from mpc_functions import *
+
+def do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state):
+    """
+    Simulation
+
+    cx: course x position list
+    cy: course y position list
+    cy: course yaw position list
+    ck: course curvature list
+    sp: speed profile
+    dl: course tick [m]
+
+    """
+
+    # goal = [cx[-1], cy[-1]]
+
+    state = initial_state
+
+    # initial yaw compensation
+    if state.yaw - cyaw[0] >= math.pi:
+        state.yaw -= math.pi * 2.0
+    elif state.yaw - cyaw[0] <= -math.pi:
+        state.yaw += math.pi * 2.0
+
+    x = [state.x]
+    y = [state.y]
+    target_ind, _ = calc_nearest_index(state, cx, cy, cyaw, 0)
+
+    odelta, oa = None, None
+
+    cyaw = smooth_yaw(cyaw)
+
+    # while MAX_TIME >= time:
+
+    sim_length = 20 if show_animation else 1
+    for i in range(sim_length):
+        xref, target_ind, dref = calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, target_ind)
+
+        time = i
+
+        x0 = [state.x, state.y, state.v, state.yaw]  # current state
+
+        oa, odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(xref, x0, dref, oa, odelta)
+
+        if odelta is None:
+            return state.x, state.y, state.yaw, state.v, None, None
+
+        di, ai = 0.0, 0.0
+        if odelta is not None:
+            di, ai = odelta[0], oa[0]
+            steering_string = f"{'left' if di > 0 else 'right '} {abs(di):.4f}"
+            print("steering", steering_string, "acceleration", ai)
+            state = update_state(state, ai, di)
+
+
+        if show_animation:  # pragma: no cover
+
+            plt.cla()
+            # for stopping simulation with the esc key.
+            plt.gcf().canvas.mpl_connect('key_release_event',
+                    lambda event: [exit(0) if event.key == 'escape' else None])
+            if ox is not None:
+                plt.plot(ox, oy, "xr", label="MPC")
+            plt.plot(cx, cy, "-r", label="course")
+
+            for i, (x, y) in enumerate(zip(cx, cy)):
+                plt.text(x, y, str(i), fontsize=12, ha='right', va='bottom')
+
+            plt.plot(x, y, "ob", label="trajectory")
+            plt.plot(xref[0, :], xref[1, :], "xk", label="xref")
+            plt.plot(cx[target_ind], cy[target_ind], "xg", label="target")
+            plot_car(state.x, state.y, state.yaw, steer=di)
+            plt.axis("equal")
+            plt.legend()
+            plt.grid(True)
+            plt.title("Time[s]:" + str(round(time, 2))
+                      + ", speed[km/h]:" + str(round(state.v * 3.6, 2))
+                      + ", STEERING:" + steering_string)
+            #plt.pause(2)
+            #plt.show()
+            plt.pause(0.01)
+    if show_animation:
+        print("NEXT")
+    return state.x, state.y, state.yaw, state.v, di, ai
+
+
+def get_waymo_course(poses, dl):
+    ax = [pose[0,3] for pose in poses]
+    ay = [pose[1,3] for pose in poses]
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
+
+    # cyaw = [i - math.pi for i in cyaw]
+    cyaw = [i for i in cyaw]
+
+    return cx, cy, cyaw, ck
+
+def transformation_matrix_to_x_y_yaw(pose):
+    pos_x = pose[0, 3]
+    pos_y = pose[1, 3]
+
+    dir_x = pose[0, 0]
+    dir_y = pose[1, 0]
+    yaw  = math.atan2(dir_y, dir_x)#  + math.pi
+    return pos_x, pos_y, yaw
+
+
+
+if MPC:
+
+    dl = 5.0  # course tick
+    cx, cy, cyaw, ck = get_waymo_course(poses_original, dl)
+
+    for index in range(cfg.start_frame, cfg.end_frame):
+        sp = calc_speed_profile(cx, cy, cyaw, TARGET_SPEED)
+        start_x, start_y, start_yaw = transformation_matrix_to_x_y_yaw(poses_new[index])
+        initial_state = State(x=start_x, y=start_y, yaw=start_yaw, v=5.0)
+        show_animation = False
+        x, y, yaw, v, di, ai = do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state)
+        mpc_steering_angles[index] = di
+        mpc_acceleration[index] = ai
+
+
+
+    data_info = {
+        "y_changes": y_changes,
+        "yaw_changes": yaw_changes,
+        "mpc_steering_angles": mpc_steering_angles,
+    }
+    # Save to a JSON file
+    with open(f"{cfg.folder}/info_data.json", "w") as json_file:
+        json.dump(data_info, json_file, indent=4)  # `indent=4` makes it pretty-printed
+
+
+    print("Step 5: Generate MPC steering angles ran SUCCESSFULLY")
+
+
+
+
+
 
 
 ################################################################
-#  STEP 5: Plot
+#  STEP 6: Plot
 ################################################################
-input_folder = f"{cfg.folder}/ego_pose"
-input_folder_orig = f"{cfg.folder}/ego_pose_original"
-poses_modified = []
-poses_original = []
+if not cfg.skip_plot:
+    input_folder = f"{cfg.folder}/ego_pose"
+    input_folder_orig = f"{cfg.folder}/ego_pose_original"
+    poses_modified = []
+    poses_original = []
 
 
-def transformation_matrix_to_pos_and_dir(pose):
-    pos_x, pos_y  = pose[0:2, 3]
-    dir_x, dir_y = pose[0:2, 0]
-    return pos_x, pos_y, dir_x, dir_y
+    def transformation_matrix_to_pos_and_dir(pose):
+        pos_x, pos_y  = pose[0:2, 3]
+        dir_x, dir_y = pose[0:2, 0]
+        return pos_x, pos_y, dir_x, dir_y
 
 
-# Iterate over all files in the modified input folder
-for i, filename in enumerate(sorted(os.listdir(input_folder))):
-    if filename.endswith('.txt') and not "_" in filename:
-        if (cfg.start_frame <= int(filename[:-4]) < cfg.end_frame):
-            input_file_path = os.path.join(input_folder, filename)
-            poses_modified.append(np.loadtxt(input_file_path))
+    # Iterate over all files in the modified input folder
+    for i, filename in enumerate(sorted(os.listdir(input_folder))):
+        if filename.endswith('.txt') and not "_" in filename:
+            if (cfg.start_frame <= int(filename[:-4]) < cfg.end_frame):
+                input_file_path = os.path.join(input_folder, filename)
+                poses_modified.append(np.loadtxt(input_file_path))
 
-# Iterate over all files in the original input folder
-for i, filename in enumerate(sorted(os.listdir(input_folder_orig))):
-    if filename.endswith('.txt') and not "_" in filename:
-        if cfg.start_frame <= int(filename[:-4]) < cfg.end_frame:
-            input_file_path = os.path.join(input_folder_orig, filename)
-            poses_original.append(np.loadtxt(input_file_path))
+    # Iterate over all files in the original input folder
+    for i, filename in enumerate(sorted(os.listdir(input_folder_orig))):
+        if filename.endswith('.txt') and not "_" in filename:
+            if cfg.start_frame <= int(filename[:-4]) < cfg.end_frame:
+                input_file_path = os.path.join(input_folder_orig, filename)
+                poses_original.append(np.loadtxt(input_file_path))
 
-fig, ax = plt.subplots()
-for INDEX in range(cfg.end_frame - cfg.start_frame): # e.g. 0..100
-    print(INDEX)
+    fig, ax = plt.subplots()
+    for INDEX in range(cfg.end_frame - cfg.start_frame): # e.g. 0..100
+        print(INDEX)
 
-    ### PLOT THE TRAJECTORIES (GREEN + RED)
-    for matrices, color in zip([poses_original, poses_modified], ['green', 'red']):
-        #                           # pos_x     pos_y     dir_x   dir_y
-        positions_and_directions = [[m[0, 3], m[1, 3], m[0, 0], m[1, 0]] for m in matrices]
-        # Plot with arrows
-        for start_x, start_y, dir_x, dir_y in positions_and_directions:
-            ax.arrow(start_x, start_y, dir_x * 0.5, dir_y * 0.5, head_width=0.2, head_length=0.4, fc='black', ec=color)
+        ### PLOT THE TRAJECTORIES (GREEN + RED)
+        for matrices, color in zip([poses_original, poses_modified], ['green', 'red']):
+            #                           # pos_x     pos_y     dir_x   dir_y
+            positions_and_directions = [[m[0, 3], m[1, 3], m[0, 0], m[1, 0]] for m in matrices]
+            # Plot with arrows
+            for start_x, start_y, dir_x, dir_y in positions_and_directions:
+                ax.arrow(start_x, start_y, dir_x * 0.5, dir_y * 0.5, head_width=0.2, head_length=0.4, fc='black', ec=color)
 
-    # Enhancements for visibility
-    all_positions = np.array([[m[0, 3], m[1, 3]] for m in poses_original + poses_modified])
-    ax.set_xlim(min(all_positions[:, 0]) - 40, max(all_positions[:, 0]) + 40)
-    ax.set_ylim(min(all_positions[:, 1]) - 40, max(all_positions[:, 1]) + 40)
-    ax.set_aspect('equal')
-    plt.xlabel('X-axis')
-    plt.ylabel('Y-axis')
-    plt.title('Trajectory')
-    plt.grid(True)
+        # Enhancements for visibility
+        all_positions = np.array([[m[0, 3], m[1, 3]] for m in poses_original + poses_modified])
+        ax.set_xlim(min(all_positions[:, 0]) - 40, max(all_positions[:, 0]) + 40)
+        ax.set_ylim(min(all_positions[:, 1]) - 40, max(all_positions[:, 1]) + 40)
+        ax.set_aspect('equal')
+        plt.xlabel('X-axis')
+        plt.ylabel('Y-axis')
+        plt.title('Trajectory')
+        plt.grid(True)
 
-    #####################################################
-    input_file = f"{cfg.folder}/track/track_info.txt"
+        #####################################################
+        input_file = f"{cfg.folder}/track/track_info.txt"
 
-    pose_new = poses_modified[INDEX]  # 4x4 np array
-    pose_old = poses_original[INDEX]  # 4x4 np array
-    assert pose_new.shape == (4,4)
-    assert pose_old.shape == (4,4)
-
-
-    ### PLOT CURRENT CAR POSE IN BLUE
-    start_x, start_y, start_dir_x, start_dir_y = transformation_matrix_to_pos_and_dir(pose_new)
-    ax.arrow(start_x, start_y, start_dir_x * 2, start_dir_y * 2, head_width=0.5, head_length=1.4, fc='black', ec="blue")
+        pose_new = poses_modified[INDEX]  # 4x4 np array
+        pose_old = poses_original[INDEX]  # 4x4 np array
+        assert pose_new.shape == (4,4)
+        assert pose_old.shape == (4,4)
 
 
-    ### READ TRACK INFO TO PLOT OTHER CARS
-    data_all = pd.read_csv(input_file, sep='\s+', header=0)
-    data = data_all[data_all["frame_id"] == INDEX + cfg.start_frame]
+        ### PLOT CURRENT CAR POSE IN BLUE
+        start_x, start_y, start_dir_x, start_dir_y = transformation_matrix_to_pos_and_dir(pose_new)
+        ax.arrow(start_x, start_y, start_dir_x * 2, start_dir_y * 2, head_width=0.5, head_length=1.4, fc='black', ec="blue")
 
-    for _, row in data.iterrows():
-        old_position_homogeneous = [row['box_center_x'], row['box_center_y'], row['box_center_z'], 1]
-        global_position = pose_new @ old_position_homogeneous
-        ax.scatter(global_position[0], global_position[1])
 
-    ### SAVE MIDDLE FRAME
-    if INDEX == 50:
-        plt.savefig(f"{cfg.folder}/overview.png")
+        ### READ TRACK INFO TO PLOT OTHER CARS
+        data_all = pd.read_csv(input_file, sep='\s+', header=0)
+        data = data_all[data_all["frame_id"] == INDEX + cfg.start_frame]
 
-    ### SHOW PLOT
-    if os.getenv("PYCHARM_HOSTED"):
-        plt.show()
-        fig, ax = plt.subplots()
-    else:
-        plt.pause(1)
-        ax.clear()
+        for _, row in data.iterrows():
+            old_position_homogeneous = [row['box_center_x'], row['box_center_y'], row['box_center_z'], 1]
+            global_position = pose_new @ old_position_homogeneous
+            ax.scatter(global_position[0], global_position[1])
+
+        ### SAVE MIDDLE FRAME
+        if INDEX == 50:
+            plt.savefig(f"{cfg.folder}/overview.png")
+
+        ### SHOW PLOT
+        if os.getenv("PYCHARM_HOSTED"):
+            plt.show()
+            fig, ax = plt.subplots()
+        else:
+            plt.pause(1)
+            ax.clear()
 
 
 
