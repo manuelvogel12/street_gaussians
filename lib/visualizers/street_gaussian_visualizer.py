@@ -4,6 +4,7 @@ import cv2
 import torch
 import imageio
 import numpy as np
+import tifffile
 
 from lib.utils.camera_utils import Camera
 from lib.utils.img_utils import visualize_depth_numpy
@@ -43,9 +44,9 @@ class StreetGaussianVisualizer():
         
         if self.save_image:
             torchvision.utils.save_image(rgb, os.path.join(self.result_dir, f'{name}_rgb.png'))
-            torchvision.utils.save_image(rgb_bkgd, os.path.join(self.result_dir, f'{name}_rgb_bkgd.png'))
-            torchvision.utils.save_image(rgb_obj, os.path.join(self.result_dir, f'{name}_rgb_obj.png'))
-            torchvision.utils.save_image(acc_obj.float(), os.path.join(self.result_dir, f'{name}_acc_obj.png'))
+            #torchvision.utils.save_image(rgb_bkgd, os.path.join(self.result_dir, f'{name}_rgb_bkgd.png'))
+            #torchvision.utils.save_image(rgb_obj, os.path.join(self.result_dir, f'{name}_rgb_obj.png'))
+            #torchvision.utils.save_image(acc_obj.float(), os.path.join(self.result_dir, f'{name}_acc_obj.png'))
             torchvision.utils.save_image(camera.original_image[:3], os.path.join(self.result_dir, f'{name}_gt.png'))
     
         if self.save_video:
@@ -62,7 +63,7 @@ class StreetGaussianVisualizer():
             self.accs_obj.append(acc_obj)
 
         
-        self.visualize_diff(result, camera)
+        # self.visualize_diff(result, camera)
         self.visualize_depth(result, camera)
         self.visualize_normal(result, camera)
     
@@ -114,6 +115,8 @@ class StreetGaussianVisualizer():
         
         if self.save_image:
             imageio.imwrite(os.path.join(self.result_dir, f'{name}_depth.png'), self.diff_visualize_func(depth))
+            
+            tifffile.imwrite(os.path.join(self.result_dir, f'{name}_depth.tiff'), depth.squeeze().astype(np.float32))
 
         if self.save_video:
             self.depths.append(depth)
@@ -184,8 +187,8 @@ class StreetGaussianVisualizer():
         if cfg.render.get('save_video', True):
             self.save_video_from_frames(self.rgbs_gt, 'color_gt')
             self.save_video_from_frames(self.rgbs, 'color')
-            self.save_video_from_frames(self.rgbs_bkgd, 'color_bkgd')
-            self.save_video_from_frames(self.rgbs_obj, 'color_obj')
-            self.save_video_from_frames(self.accs_obj, 'acc_obj')
+            #self.save_video_from_frames(self.rgbs_bkgd, 'color_bkgd')
+            #self.save_video_from_frames(self.rgbs_obj, 'color_obj')
+            #self.save_video_from_frames(self.accs_obj, 'acc_obj')
             self.save_video_from_frames(self.depths, 'depth', visualize_func=self.depth_visualize_func)
-            self.save_video_from_frames(self.diffs, 'diff', visualize_func=self.diff_visualize_func)
+            #self.save_video_from_frames(self.diffs, 'diff', visualize_func=self.diff_visualize_func)

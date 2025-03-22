@@ -33,7 +33,7 @@ class ActorPose(nn.Module):
         state_dict = dict()
         if self.opt_track:
             state_dict['params'] = self.state_dict()
-        if not is_final:
+        if not is_final and self.opt_track:
             state_dict['optimizer'] = self.optimizer.state_dict()
         return state_dict
         

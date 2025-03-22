@@ -8,3 +8,7 @@ diff_rasterization/dist
 tensorboard_3d
 screenshots
 .idea
+*.egg-info
+*.pth
+result.json
+configs/waymo_train_*[0-9][0-9][0-9][0-9].yaml
