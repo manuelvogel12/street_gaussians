@@ -75,6 +75,7 @@ class ModelPredictiveControl:
         assert trajectory.ndim == 2 and trajectory.shape[1] == 3
         self.trajectory = trajectory
 
+
     def set_reference_trajectory_matrix(self, matrices):
         """
         trajectory: iterable of numpy arrays shaped (4,4)
@@ -85,10 +86,18 @@ class ModelPredictiveControl:
             trajectory_array[i, 2] = ModelPredictiveControl.yaw_from_matrix(matrix)
         self.trajectory = trajectory_array
 
+    def set_target_velocity(self, velocity):
+        """
+        velocity: float
+        """
+        assert isinstance(velocity, (float, int))
+        self.target_velocity = velocity
+
     def set_lookahead_distance(self, distance):
         """
         distance: float
         """
+        assert isinstance(distance, (float, int))
         self.lookahead_distance = distance
 
     def set_obstacles(self, obstacles):

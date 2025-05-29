@@ -92,9 +92,10 @@ for i, filename in enumerate(sorted(os.listdir(input_folder_orig))):
 
 
 ####################################################################
+fig, ax = plt.subplots()
 for INDEX in range(100):
     print(INDEX)
-    fig, ax = plt.subplots()
+    ax.clear()    
 
     for matrices, color in zip([poses_original, poses_modified], ['green', 'red']):
         # Extract positions (x, y) from the fourth column of each matrix
@@ -166,7 +167,7 @@ for INDEX in range(100):
     # data_all.to_csv(output_file, sep=' ', index=False, header=True)
     # print(f"Modified file saved as {output_file}")
 
-    plt.show()
+    plt.pause(0.1)
 
 
 

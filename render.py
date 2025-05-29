@@ -67,7 +67,7 @@ def render_trajectory():
     cfg.render.save_video = True
     
     with torch.no_grad():
-        dataset = Dataset()        
+        dataset = Dataset()         # Loads cameras, dynamic masks, etc
         gaussians = StreetGaussianModel(dataset.scene_info.metadata)
 
         scene = Scene(gaussians=gaussians, dataset=dataset)
@@ -125,7 +125,7 @@ def render_lidar():
         scene = Scene(gaussians=gaussians, dataset=dataset)
         renderer = StreetGaussianRenderer()
         
-        save_dir = os.path.join(cfg.model_path, 'trajectory', "ours_{}".format(scene.loaded_iter))
+        save_dir = os.path.join(cfg.model_path, 'trajectory_lidar', "ours_{}".format(scene.loaded_iter))
         visualizer = StreetGaussianVisualizer(save_dir)
         
         train_cameras = scene.getTrainCameras()
@@ -136,7 +136,7 @@ def render_lidar():
         old_rot, old_trans = None, None
 
         for idx, camera in enumerate(tqdm(cameras, desc="Rendering Trajectory")):
-            print("idx", idx, "id", camera.id)
+            # print("idx", idx, "id", camera.id)
             if camera.id % 3 == 0:
                 old_ext = camera.get_extrinsic()
                 old_rot = old_ext[:3, :3]

@@ -3,6 +3,7 @@ import shutil
 import json
 import random
 import types
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,8 @@ def get_config():
     parser.add_argument("--end_frame", type=int, default=197, help="Ending frame index")
     parser.add_argument("--random_translation", type=float, nargs=2, default=[-6.0, 6.0], help="Random translation range")
     parser.add_argument("--random_rotation", type=float, nargs=2, default=[-0.4, 0.4], help="Random rotation range")
-    parser.add_argument("--folder", type=str, default="../data/waymo/training/0002", help="Path to training folder")
+    parser.add_argument("--folder", type=str, default="../data/waymo/training/carla_0012", help="Path to training folder")
+    parser.add_argument("--run_mpc", action="store_true", help="Run MPC Controller")
     parser.add_argument("--skip_plot", action="store_true", help="Skip plotting")
 
     return parser.parse_args()
@@ -244,133 +246,171 @@ print("Step 4: Modified track_info.txt (poses of other cars) ran SUCCESSFULLY")
 ################################################################
 #  STEP 5: Run MPC
 ################################################################
-MPC = False
+# MPC = False
+#
+# mpc_steering_angles = {}
+# mpc_acceleration = {}
+#
+#
+# from mpc_functions import *
+#
+# def do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state):
+#     """
+#     Simulation
+#
+#     cx: course x position list
+#     cy: course y position list
+#     cy: course yaw position list
+#     ck: course curvature list
+#     sp: speed profile
+#     dl: course tick [m]
+#
+#     """
+#
+#     # goal = [cx[-1], cy[-1]]
+#
+#     state = initial_state
+#
+#     # initial yaw compensation
+#     if state.yaw - cyaw[0] >= math.pi:
+#         state.yaw -= math.pi * 2.0
+#     elif state.yaw - cyaw[0] <= -math.pi:
+#         state.yaw += math.pi * 2.0
+#
+#     x = [state.x]
+#     y = [state.y]
+#     target_ind, _ = calc_nearest_index(state, cx, cy, cyaw, 0)
+#
+#     odelta, oa = None, None
+#
+#     cyaw = smooth_yaw(cyaw)
+#
+#     # while MAX_TIME >= time:
+#
+#     sim_length = 20 if show_animation else 1
+#     for i in range(sim_length):
+#         xref, target_ind, dref = calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, target_ind)
+#
+#         time = i
+#
+#         x0 = [state.x, state.y, state.v, state.yaw]  # current state
+#
+#         oa, odelta, ox, oy, poseoyaw, ov = iterative_linear_mpc_control(xref, x0, dref, oa, odelta)
+#
+#         if odelta is None:
+#             return state.x, state.y, state.yaw, state.v, None, None
+#
+#         di, ai = 0.0, 0.0
+#         if odelta is not None:
+#             di, ai = odelta[0], oa[0]
+#             steering_string = f"{'left' if di > 0 else 'right '} {abs(di):.4f}"
+#             print("steering", steering_string, "acceleration", ai)
+#             state = update_state(state, ai, di)
+#
+#
+#         if show_animation:  # pragma: no cover
+#
+#             plt.cla()
+#             # for stopping simulation with the esc key.
+#             plt.gcf().canvas.mpl_connect('key_release_event',
+#                     lambda event: [exit(0) if event.key == 'escape' else None])
+#             if ox is not None:
+#                 plt.plot(ox, oy, "xr", label="MPC")
+#             plt.plot(cx, cy, "-r", label="course")
+#
+#             for i, (x, y) in enumerate(zip(cx, cy)):
+#                 plt.text(x, y, str(i), fontsize=12, ha='right', va='bottom')
+#
+#             plt.plot(x, y, "ob", label="trajectory")
+#             plt.plot(xref[0, :], xref[1, :], "xk", label="xref")
+#             plt.plot(cx[target_ind], cy[target_ind], "xg", label="target")
+#             plot_car(state.x, state.y, state.yaw, steer=di)
+#             plt.axis("equal")
+#             plt.legend()
+#             plt.grid(True)
+#             plt.title("Time[s]:" + str(round(time, 2))
+#                       + ", speed[km/h]:" + str(round(state.v * 3.6, 2))
+#                       + ", STEERING:" + steering_string)
+#             #plt.pause(2)
+#             #plt.show()
+#             plt.pause(0.01)
+#     if show_animation:
+#         print("NEXT")
+#     return state.x, state.y, state.yaw, state.v, di, ai
+#
+#
+# def get_waymo_course(poses, dl):
+#     ax = [pose[0,3] for pose in poses]
+#     ay = [pose[1,3] for pose in poses]
+#     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
+#
+#     # cyaw = [i - math.pi for i in cyaw]
+#     cyaw = [i for i in cyaw]
+#
+#     return cx, cy, cyaw, ck
+#
+# def transformation_matrix_to_x_y_yaw(pose):
+#     pos_x = pose[0, 3]
+#     pos_y = pose[1, 3]
+#
+#     dir_x = pose[0, 0]
+#     dir_y = pose[1, 0]
+#     yaw  = math.atan2(dir_y, dir_x)#  + math.pi
+#     return pos_x, pos_y, yaw
+#
+#
+#
+# if MPC:
+#
+#     dl = 5.0  # course tick
+#     cx, cy, cyaw, ck = get_waymo_course(poses_original, dl)
+#
+#     for index in range(cfg.start_frame, cfg.end_frame):
+#         sp = calc_speed_profile(cx, cy, cyaw, TARGET_SPEED)
+#         start_x, start_y, start_yaw = transformation_matrix_to_x_y_yaw(poses_new[index])
+#         initial_state = State(x=start_x, y=start_y, yaw=start_yaw, v=5.0)
+#         show_animation = False
+#         x, y, yaw, v, di, ai = do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state)
+#         mpc_steering_angles[index] = di
+#         mpc_acceleration[index] = ai
 
 mpc_steering_angles = {}
-mpc_acceleration = {}
+if cfg.run_mpc:
 
+    # get Trajectory as (N,4) array
+    trajectory_x = [pose[0,3] for pose in poses_original]
+    trajectory_y = [pose[1,3] for pose in poses_original]
+    trajectory_phi = [R.from_matrix(pose[:3, :3]).as_euler('zyx')[0] for pose in poses_original]
 
-from mpc_functions import *
+    # get initial pose as (4,) array
+    init_pose_matrix = poses_original[0]
+    yaw, _, _ = R.from_matrix(init_pose_matrix[:3, :3]).as_euler('zyx')  # Using ZYX Euler angle
+    initial_pose = np.array([init_pose_matrix[0,3], init_pose_matrix[1,3], yaw, 0.0])
 
-def do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state):
-    """
-    Simulation
+    from mpc import ModelPredictiveControl
+    mpc = ModelPredictiveControl()
 
-    cx: course x position list
-    cy: course y position list
-    cy: course yaw position list
-    ck: course curvature list
-    sp: speed profile
-    dl: course tick [m]
+    mpc.set_initial_position(initial_pose)
+    mpc.set_reference_trajectory(np.stack([trajectory_x, trajectory_y, trajectory_phi], axis=1))
+    mpc.set_lookahead_distance(8.0)
+    mpc.set_range(cfg.start_frame, cfg.end_frame)
 
-    """
+    # read other vehicles
+    input_file = f"{cfg.folder}/track/track_info.txt"
+    data_all = pd.read_csv(input_file, sep='\s+', header=0)
 
-    # goal = [cx[-1], cy[-1]]
+    def run_at_step_i(frame_id, data_all, poses_new):
+        data = data_all[data_all["frame_id"] == frame_id]
+        obstacles = []
+        for _, row in data.iterrows():
+            old_position_homogeneous = [row['box_center_x'], row['box_center_y'], row['box_center_z'], 1]
+            global_position = poses_new[frame_id] @ old_position_homogeneous
+            obstacles.append(np.array([global_position[0], global_position[1], 1]))
 
-    state = initial_state
+        # set obstacles
+        mpc.set_obstacles(np.array(obstacles))
+    mpc.simulate(partial(run_at_step_i, data_all=data_all, poses_new=poses_new))
 
-    # initial yaw compensation
-    if state.yaw - cyaw[0] >= math.pi:
-        state.yaw -= math.pi * 2.0
-    elif state.yaw - cyaw[0] <= -math.pi:
-        state.yaw += math.pi * 2.0
-
-    x = [state.x]
-    y = [state.y]
-    target_ind, _ = calc_nearest_index(state, cx, cy, cyaw, 0)
-
-    odelta, oa = None, None
-
-    cyaw = smooth_yaw(cyaw)
-
-    # while MAX_TIME >= time:
-
-    sim_length = 20 if show_animation else 1
-    for i in range(sim_length):
-        xref, target_ind, dref = calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, target_ind)
-
-        time = i
-
-        x0 = [state.x, state.y, state.v, state.yaw]  # current state
-
-        oa, odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(xref, x0, dref, oa, odelta)
-
-        if odelta is None:
-            return state.x, state.y, state.yaw, state.v, None, None
-
-        di, ai = 0.0, 0.0
-        if odelta is not None:
-            di, ai = odelta[0], oa[0]
-            steering_string = f"{'left' if di > 0 else 'right '} {abs(di):.4f}"
-            print("steering", steering_string, "acceleration", ai)
-            state = update_state(state, ai, di)
-
-
-        if show_animation:  # pragma: no cover
-
-            plt.cla()
-            # for stopping simulation with the esc key.
-            plt.gcf().canvas.mpl_connect('key_release_event',
-                    lambda event: [exit(0) if event.key == 'escape' else None])
-            if ox is not None:
-                plt.plot(ox, oy, "xr", label="MPC")
-            plt.plot(cx, cy, "-r", label="course")
-
-            for i, (x, y) in enumerate(zip(cx, cy)):
-                plt.text(x, y, str(i), fontsize=12, ha='right', va='bottom')
-
-            plt.plot(x, y, "ob", label="trajectory")
-            plt.plot(xref[0, :], xref[1, :], "xk", label="xref")
-            plt.plot(cx[target_ind], cy[target_ind], "xg", label="target")
-            plot_car(state.x, state.y, state.yaw, steer=di)
-            plt.axis("equal")
-            plt.legend()
-            plt.grid(True)
-            plt.title("Time[s]:" + str(round(time, 2))
-                      + ", speed[km/h]:" + str(round(state.v * 3.6, 2))
-                      + ", STEERING:" + steering_string)
-            #plt.pause(2)
-            #plt.show()
-            plt.pause(0.01)
-    if show_animation:
-        print("NEXT")
-    return state.x, state.y, state.yaw, state.v, di, ai
-
-
-def get_waymo_course(poses, dl):
-    ax = [pose[0,3] for pose in poses]
-    ay = [pose[1,3] for pose in poses]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
-
-    # cyaw = [i - math.pi for i in cyaw]
-    cyaw = [i for i in cyaw]
-
-    return cx, cy, cyaw, ck
-
-def transformation_matrix_to_x_y_yaw(pose):
-    pos_x = pose[0, 3]
-    pos_y = pose[1, 3]
-
-    dir_x = pose[0, 0]
-    dir_y = pose[1, 0]
-    yaw  = math.atan2(dir_y, dir_x)#  + math.pi
-    return pos_x, pos_y, yaw
-
-
-
-if MPC:
-
-    dl = 5.0  # course tick
-    cx, cy, cyaw, ck = get_waymo_course(poses_original, dl)
-
-    for index in range(cfg.start_frame, cfg.end_frame):
-        sp = calc_speed_profile(cx, cy, cyaw, TARGET_SPEED)
-        start_x, start_y, start_yaw = transformation_matrix_to_x_y_yaw(poses_new[index])
-        initial_state = State(x=start_x, y=start_y, yaw=start_yaw, v=5.0)
-        show_animation = False
-        x, y, yaw, v, di, ai = do_simulation_step(cx, cy, cyaw, ck, sp, dl, initial_state)
-        mpc_steering_angles[index] = di
-        mpc_acceleration[index] = ai
 
 
 
@@ -436,8 +476,8 @@ if not cfg.skip_plot:
 
         # Enhancements for visibility
         all_positions = np.array([[m[0, 3], m[1, 3]] for m in poses_original + poses_modified])
-        ax.set_xlim(min(all_positions[:, 0]) - 40, max(all_positions[:, 0]) + 40)
-        ax.set_ylim(min(all_positions[:, 1]) - 40, max(all_positions[:, 1]) + 40)
+        ax.set_xlim(min(all_positions[:, 0]) - 10, max(all_positions[:, 0]) + 10)
+        ax.set_ylim(min(all_positions[:, 1]) - 10, max(all_positions[:, 1]) + 10)
         ax.set_aspect('equal')
         plt.xlabel('X-axis')
         plt.ylabel('Y-axis')
@@ -455,6 +495,7 @@ if not cfg.skip_plot:
 
         ### PLOT CURRENT CAR POSE IN BLUE
         start_x, start_y, start_dir_x, start_dir_y = transformation_matrix_to_pos_and_dir(pose_new)
+        start_yaw = np.arctan2(start_dir_y, start_dir_x)
         ax.arrow(start_x, start_y, start_dir_x * 2, start_dir_y * 2, head_width=0.5, head_length=1.4, fc='black', ec="blue")
 
 
@@ -464,8 +505,12 @@ if not cfg.skip_plot:
 
         for _, row in data.iterrows():
             old_position_homogeneous = [row['box_center_x'], row['box_center_y'], row['box_center_z'], 1]
-            global_position = pose_new @ old_position_homogeneous
-            ax.scatter(global_position[0], global_position[1])
+            global_position_car = pose_new @ old_position_homogeneous
+            global_yaw_car = np.deg2rad(row['box_heading']) + start_yaw
+            global_dir_car = np.array([np.cos(global_yaw_car),  np.sin(global_yaw_car)])
+
+            # ax.scatter(global_position[0], global_position[1])
+            ax.arrow(global_position_car[0], global_position_car[1], global_dir_car[0], global_dir_car[1], head_width=0.5, head_length=1.4)
 
         ### SAVE MIDDLE FRAME
         if INDEX == 50:

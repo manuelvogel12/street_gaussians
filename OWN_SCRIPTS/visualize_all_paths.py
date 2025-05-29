@@ -50,6 +50,7 @@ def run_mpc_step(x, y, yaw, v, ego_poses, other_vehicle_locations=None):
     MPC.set_reference_trajectory_matrix(ego_poses)
     MPC.set_range(0, 1)
     MPC.set_lookahead_distance(150)
+    MPC.set_target_velocity(v)
 
     steerings, throttles, waypoints_per_frame = MPC.simulate(plotting=False, rt_plotting=False)
     waypoints = waypoints_per_frame[0]
@@ -118,6 +119,9 @@ for _, row in data_all.iterrows():
 
 num_random_mpc_trajectories = 15
 
+mpc_path_plots = []
+mpc_trajectories = []
+mpc_start_idx = []
 for trajectory_idx in range(num_random_mpc_trajectories):
     start_point_idx = random.randint(50,150)
     yaw_change = random.uniform(-0.7,0.8)
@@ -131,9 +135,15 @@ for trajectory_idx in range(num_random_mpc_trajectories):
         color='red', head_width=0.7, head_length=1.2, length_includes_head=True
     )
 
-    _,_, waypoints = run_mpc_step(x=new_translation[0], y=new_translation[1], yaw=new_yaw, v=15, ego_poses=ego_car_poses, other_vehicle_locations=None)
+    _,_, waypoints = run_mpc_step(x=new_translation[0], y=new_translation[1], yaw=new_yaw, v=8, ego_poses=ego_car_poses, other_vehicle_locations=None)
+    mpc_trajectories.append(waypoints)
+    mpc_start_idx.append(start_point_idx)
 
+    # plot path
     plt.plot(waypoints[:,0], waypoints[:,1], color="black")
+
+    # plot (moveable) point
+    mpc_path_plots.append(plt.scatter(waypoints[0,0], waypoints[0,1], label=f"mpc{trajectory_idx}", color="yellow", zorder=3))
 
 
 
@@ -154,17 +164,17 @@ for trajectory_idx in range(num_random_mpc_trajectories):
 #
 
 
-# # PLOT OTHER VEHICLES AS POINTS
-car_points = {}
+# # PLOT OTHER VEHICLES AS MOVEABLE POINTS
+car_plots = {}
 for k, v in data_other_vehicles.items():
     if len(v.items()) > 30:
         start_frame_id = 0
         if start_frame_id in v.keys():
-            car_points[k] = plt.scatter(v[start_frame_id][0],v[start_frame_id][1], label=k, color="purple")
+            car_plots[k] = plt.scatter(v[start_frame_id][0], v[start_frame_id][1], label=k, color="purple", zorder=3)
 
 
-# Plot EGO VEHICLE
-ego_car_plot = plt.scatter(x_vals[0], y_vals[0], label="ego", color="orange")
+# Plot EGO VEHICLE AS MOVABLE POINTS
+ego_car_plot = plt.scatter(x_vals[0], y_vals[0], label="ego", color="orange",zorder=3.2)
 
 
 
@@ -198,11 +208,17 @@ def frame_update(frame):
 
     # update otehr cars
     for k, v in data_other_vehicles.items():
-        if k in car_points and frame in v.keys():
-            car_points[k].set_offsets([[v[frame][0], v[frame][1]]])
+        if k in car_plots and frame in v.keys():
+            car_plots[k].set_offsets([[v[frame][0], v[frame][1]]])
 
     # update ego car
     ego_car_plot.set_offsets([[x_vals[frame], y_vals[frame]]])
+
+    # update mpc_paths
+    for trajectory_idx, mpc_trajectory in enumerate(mpc_trajectories):
+        start_offset = mpc_start_idx[trajectory_idx]
+        if 0 < frame - start_offset < len(mpc_trajectory):
+            mpc_path_plots[trajectory_idx].set_offsets([[ mpc_trajectory[frame - start_offset][0], mpc_trajectory[frame - start_offset][1] ]])
     fig.canvas.draw_idle()
 
 
